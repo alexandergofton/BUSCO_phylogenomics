@@ -33,7 +33,8 @@ def main():
     parser.add_argument("--missing_character", type=str, action="store", dest="missing_character", help="Character to represent missing data [default='?']", default="?")
     parser.add_argument("--gene_tree_program", type=str, action="store", dest="gene_tree_program", default="fasttree", help="Program to use to generate gene trees (fasttree or iqtree) [default=fasttree]")
     parser.add_argument("--busco_version_3", action="store_true", help="Flag to indicate that BUSCO version 3 was used (which has slighly different output structure)")
-    
+    parser.add_argument("--nt", action="store_true", help="Flag to perform phylogenomic reconstruction using nucltotide sequenes rather than aa sequences")
+
     args = parser.parse_args()
 
     print_message("Starting BUSCO Phylogenomics Pipeline")
@@ -119,34 +120,58 @@ def main():
     buscos_per_species = {}
 
     # Identify single-copy BUSCOs per species
-
-    for busco_sample_name, busco_sample in zip(busco_sample_names, busco_samples):
-        buscos_per_species[busco_sample_name] = []
-
-        if args.busco_version_3:
-            chdir(join(busco_sample, "single_copy_busco_sequences"))
-        else:
-            chdir(join(busco_sample, "busco_sequences", "single_copy_busco_sequences"))
-
-        for f in listdir("."):
-            if f.endswith(".faa"):
-                busco_name = f.rstrip(".faa")
-                all_buscos.add(busco_name)
-                if busco_name not in buscos:
-                    buscos[busco_name] = []
-            
-                record = SeqIO.read(f, "fasta")
-                new_record = SeqRecord(Seq(str(record.seq)), id=busco_sample_name, description="")
+    if args.nt:
+        for busco_sample_name, busco_sample in zip(busco_sample_names, busco_samples):
+            buscos_per_species[busco_sample_name] = []
+    
+            if args.busco_version_3:
+                chdir(join(busco_sample, "single_copy_busco_sequences"))
+            else:
+                chdir(join(busco_sample, "busco_sequences", "single_copy_busco_sequences"))
+    
+            for f in listdir("."):
+                if f.endswith(".fna"):
+                    busco_name = f.rstrip(".fna")
+                    all_buscos.add(busco_name)
+                    if busco_name not in buscos:
+                        buscos[busco_name] = []
                 
-                buscos_per_species[busco_sample_name].append(busco_name)
-                buscos[busco_name].append(new_record)
+                    record = SeqIO.read(f, "fasta")
+                    new_record = SeqRecord(Seq(str(record.seq)), id=busco_sample_name, description="")
+                    
+                    buscos_per_species[busco_sample_name].append(busco_name)
+                    buscos[busco_name].append(new_record)
+    else:    
+        for busco_sample_name, busco_sample in zip(busco_sample_names, busco_samples):
+            buscos_per_species[busco_sample_name] = []
+    
+            if args.busco_version_3:
+                chdir(join(busco_sample, "single_copy_busco_sequences"))
+            else:
+                chdir(join(busco_sample, "busco_sequences", "single_copy_busco_sequences"))
+    
+            for f in listdir("."):
+                if f.endswith(".faa"):
+                    busco_name = f.rstrip(".faa")
+                    all_buscos.add(busco_name)
+                    if busco_name not in buscos:
+                        buscos[busco_name] = []
+                
+                    record = SeqIO.read(f, "fasta")
+                    new_record = SeqRecord(Seq(str(record.seq)), id=busco_sample_name, description="")
+                    
+                    buscos_per_species[busco_sample_name].append(busco_name)
+                    buscos[busco_name].append(new_record)
 
     print("Name\tComplete and single-copy BUSCOs:")
     for busco_sample_name in busco_sample_names:
         print(busco_sample_name, len(buscos_per_species[busco_sample_name]))
                 
     print()
-    print_message(len(all_buscos), "unique BUSCO proteins considered")
+    if args.nt:
+        print_message(len(all_buscos), "unique BUSCO nucleotide considered")
+    else:
+        print_message(len(all_buscos), "unique BUSCO proteins considered")
     print()
 
     
@@ -177,16 +202,22 @@ def main():
 
         if len(single_copy_buscos) == 0:
             if args.psc == 100.0:
-                print_message("ERROR. Didn't identify any BUSCO proteins that are complete and single-copy in all species")
-            else:
-                print_message("ERROR. Didn't identify any BUSCO proteins that are complete and single-copy in at least", args.psc, "percent of species")
+                if args.nt:
+                    print_message("ERROR. Didn't identify any BUSCO nucleotides that are complete and single-copy in all species")
+                    print_message("ERROR. Didn't identify any BUSCO nucleotides that are complete and single-copy in at least", args.psc, "percent of species")
+                else:
+                    print_message("ERROR. Didn't identify any BUSCO proteins that are complete and single-copy in all species")
+                    print_message("ERROR. Didn't identify any BUSCO proteins that are complete and single-copy in all species")
             print_message("You may want to adjust the --percent_single_copy parameter to allow for greater amounts of missing data if your dataset is patchy")
             sys.exit()
 
         if args.psc == 100.0:
-            print_message("Identified", len(single_copy_buscos), "BUSCO proteins that are complete and single-copy in all species:")
-        else:
-            print_message("Identified", len(single_copy_buscos), "BUSCO proteins that are complete and single-copy in at least", args.psc, "percent of species:")
+            if args.nt:
+                print_message("Identified", len(single_copy_buscos), "BUSCO nucleotides that are complete and single-copy in all species:")
+                print_message("Identified", len(single_copy_buscos), "BUSCO nucleotides that are complete and single-copy in at least", args.psc, "percent of species:")
+            else:
+                print_message("ERROR. Didn't identify any BUSCO proteins that are complete and single-copy in all species")
+                print_message("ERROR. Didn't identify any BUSCO proteins that are complete and single-copy in all species")
         print(",".join(single_copy_buscos))
         print()
 
@@ -194,20 +225,30 @@ def main():
         mkdir("supermatrix")
         chdir("supermatrix")
         
-        mkdir("proteins")
-        print_message("Writing protein sequences to", join(working_directory, "supermatrix", "proteins"))
-
-        for busco in single_copy_buscos:
-            busco_records = buscos[busco]
-            SeqIO.write(busco_records, join(working_directory, "supermatrix", "proteins", busco + ".faa"), "fasta")
+        if args.nt:
+            mkdir("nucleotides")
+            print_message("Writing nucleotide sequences to", join(working_directory, "supermatrix", "nucleotides"))
+            for busco in single_copy_buscos:
+                busco_records = buscos[busco]
+                SeqIO.write(busco_records, join(working_directory, "supermatrix", "nucleotides", busco + ".fna"), "fasta")
+        else:
+            mkdir("proteins")
+            print_message("Writing protein sequences to", join(working_directory, "supermatrix", "proteins"))
+            for busco in single_copy_buscos:
+                busco_records = buscos[busco]
+                SeqIO.write(busco_records, join(working_directory, "supermatrix", "proteins", busco + ".faa"), "fasta")
 
         mkdir("alignments")
-        print_message("Aligning protein sequences using MUSCLE with", threads, "parallel jobs to:", join(working_directory, "supermatrix", "alignments"))
-
-        mp_commands = []
-        for busco in single_copy_buscos:
-            mp_commands.append([join(working_directory, "supermatrix", "proteins", busco + ".faa"),
-                                join(working_directory, "supermatrix", "alignments", busco + ".aln")])
+        if args.nt:
+            print_message("Aligning nucleotide sequences using MUSCLE with", threads, "parallel jobs to:", join(working_directory, "supermatrix", "alignments"))
+            mp_commands = []
+            for busco in single_copy_buscos:
+                mp_commands.append([join(working_directory, "supermatrix", "nucleotides", busco + ".fna"), join(working_directory, "supermatrix", "alignments", busco + ".aln")])
+        else:
+            print_message("Aligning protein sequences using MUSCLE with", threads, "parallel jobs to:", join(working_directory, "supermatrix", "alignments"))
+            mp_commands = []
+            for busco in single_copy_buscos:
+                mp_commands.append([join(working_directory, "supermatrix", "proteins", busco + ".faa"), join(working_directory, "supermatrix", "alignments", busco + ".aln")])
 
         pool = mp.Pool(processes=threads)
         results = pool.map(run_muscle, mp_commands)
@@ -287,8 +328,10 @@ def main():
         fo.write("end;\n")
 
         fo.close()
-
-        print_message("Supermatrix alignment is", str(len(alignments[sample])), "amino acids in length")
+        if args.nt:
+            print_message("Supermatrix alignment is", str(len(alignments[sample])), "nucleotides in length")
+        else:
+            print_message("Supermatrix alignment is", str(len(alignments[sample])), "amino acids in length")
 
         print()
 
@@ -304,28 +347,42 @@ def main():
                 single_copy_buscos_4_species.append(busco)
                 # print(busco, len(buscos[busco]))
 
-        print_message("Identified", len(single_copy_buscos_4_species), "BUSCO proteins that are complete and single-copy in at least 4 species:")
+        if args.nt:
+            print_message("Identified", len(single_copy_buscos_4_species), "BUSCO nucleotides that are complete and single-copy in at least 4 species:")
+        else:
+            print_message("Identified", len(single_copy_buscos_4_species), "BUSCO proteins that are complete and single-copy in at least 4 species:")
         print(",".join(single_copy_buscos_4_species))
 
         mkdir("gene_trees_single_copy")
         chdir("gene_trees_single_copy")
 
         print()
+        if args.nt:
+            mkdir("nucleotides_4")
+            print_message("Writing nucleotide sequences to", join(working_directory, "gene_trees", "nucleotides_4"))
+            for busco in single_copy_buscos_4_species:
+                busco_records = buscos[busco]
+                SeqIO.write(busco_records, join(working_directory, "gene_trees_single_copy", "nucleotides_4", busco + ".fna"), "fasta")
+        else:
+            mkdir("proteins_4")
+            print_message("Writing protein sequences to", join(working_directory, "gene_trees", "proteins_4"))
+            for busco in single_copy_buscos_4_species:
+                busco_records = buscos[busco]
+                SeqIO.write(busco_records, join(working_directory, "gene_trees_single_copy", "proteins_4", busco + ".faa"), "fasta")
 
-        mkdir("proteins_4")
-        print_message("Writing protein sequences to", join(working_directory, "gene_trees", "proteins_4"))
-
-        for busco in single_copy_buscos_4_species:
-            busco_records = buscos[busco]
-            SeqIO.write(busco_records, join(working_directory, "gene_trees_single_copy", "proteins_4", busco + ".faa"), "fasta")    
-
+            
         mkdir("alignments_4")
         print_message("Aligning protein sequences using MUSCLE with", threads, "parallel jobs to:", join(working_directory, "gene_trees_single_copy", "alignments_4"))
 
-        mp_commands = []
-        for busco in single_copy_buscos_4_species:
-            mp_commands.append([join(working_directory, "gene_trees_single_copy", "proteins_4", busco + ".faa"),
-                                join(working_directory, "gene_trees_single_copy", "alignments_4", busco + ".aln")])
+        if args.nt:
+            mp_commands = []
+            for busco in single_copy_buscos_4_species:
+                mp_commands.append([join(working_directory, "gene_trees_single_copy", "nucleotides_4", busco + ".fna"), join(working_directory, "gene_trees_single_copy", "alignments_4", busco + ".aln")])
+        else:
+            mp_commands = []
+            for busco in single_copy_buscos_4_species:
+                mp_commands.append([join(working_directory, "gene_trees_single_copy", "proteins_4", busco + ".faa"), join(working_directory, "gene_trees_single_copy", "alignments_4", busco + ".aln")])
+
         
         pool = mp.Pool(processes=threads)
         results = pool.map(run_muscle, mp_commands)
